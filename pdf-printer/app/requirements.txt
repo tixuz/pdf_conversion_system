@@ -1,0 +1,8 @@
+fastapi
+uvicorn
+pydantic
+aiofiles
+python-multipart
+jinja2
+pika
+requests

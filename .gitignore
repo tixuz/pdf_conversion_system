@@ -1,0 +1,54 @@
+# Byte-compiled / optimized / DLL files
+__pycache__/
+*.py[cod]
+*.so
+*.pyd
+*.pyo
+
+# Virtual environment
+venv/
+env/
+*.env
+
+# Docker-related
+*.log
+*.pid
+*.sock
+*.tar
+*.bak
+docker-compose.override.yml
+pdf-printer/app/pdfprinter.log
+
+# Shared files
+shared/*
+!shared/.gitkeep  # If you want to keep the folder structure
+
+# LibreOffice-generated PDFs
+*.pdf
+*.xlsx
+
+# OS and Editor generated
+.DS_Store
+Thumbs.db
+*.swp
+*.swo
+*~
+
+# VSCode and JetBrains
+.vscode/
+.idea/
+
+# Testing & coverage
+htmlcov/
+coverage.xml
+*.cover
+.pytest_cache/
+nosetests.xml
+test-output/
+junit.xml
+
+# Cache & temp
+*.tmp
+*.temp
+*.log
+.cache/

@@ -1,0 +1,57 @@
+version: '3.9'
+
+services:
+  rabbitmq:
+    image: rabbitmq:3-management
+    container_name: rabbitmq
+    ports:
+      - "5672:5672"   # AMQP protocol
+      - "15672:15672" # Management UI
+    environment:
+      RABBITMQ_DEFAULT_USER: user
+      RABBITMQ_DEFAULT_PASS: password
+    networks:
+      - pdf-net
+
+  pdf-printer:
+    build: ./pdf-printer
+    container_name: pdf-printer
+    ports:
+      - "5000:5000"
+    volumes:
+      - ./shared:/app/shared
+    depends_on:
+      - rabbitmq
+    networks:
+      - pdf-net
+      - shared-network
+    environment:
+      RABBITMQ_HOST: rabbitmq
+      SHARED_FOLDER: /app/shared
+      RABBITMQ_USER: user
+      RABBITMQ_PASS: password
+      PDF_PRINTER_USER: user
+      PDF_PRINTER_PASS: password
+
+  pdf-worker:
+    build: ./pdf-worker
+    container_name: pdf-worker
+    volumes:
+      - ./shared:/shared
+    depends_on:
+      - rabbitmq
+    networks:
+      - pdf-net
+      - shared-network
+    environment:
+      RABBITMQ_HOST: rabbitmq
+      SHARED_FOLDER: /shared
+      RABBITMQ_USER: user
+      RABBITMQ_PASS: password
+      PDF_PRINTER_USER: user
+      PDF_PRINTER_PASS: password
+
+networks:
+  pdf-net:
+  shared-network:
+    external: true
