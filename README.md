@@ -28,6 +28,25 @@ pdf_conversion_system/
 
 ## 🐳 How to Setup (Home Docker Environment)
 
+### 🧭 Step 0: Create External Docker Network
+
+This system uses a shared Docker network called `shared-network` to enable communication between services.
+
+Before running `docker-compose`, create it (only once) with the following command:
+
+```bash
+docker network create shared-network
+```
+
+Note: If the network already exists, Docker will return:
+
+```bash
+Error response from daemon: network with name shared-network already exists
+```
+
+You can safely ignore this message and continue.
+
+
 ### 1. Clone and prepare:
 ```bash
 git clone https://github.com/yourusername/pdf_conversion_system.git

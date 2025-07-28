@@ -1,4 +1,3 @@
- (cd "$(git rev-parse --show-toplevel)" && git apply --3way <<'EOF'
 diff --git a/pdf-printer/app/main.py b/pdf-printer/app/main.py
 index 7abe443641bbd5462d7fa54b7ceb9aa36f1c886d..8c8aa2e5fe6512debaffd04a9dfac2efce2d13e9 100644
 --- a/pdf-printer/app/main.py
@@ -405,6 +404,3 @@ index 0000000000000000000000000000000000000000..9efc8b2bb65861f4904ba14213783b62
 +<p>Could not retrieve queue stats.</p>
 +{% endif %}
 +{% endblock %}
-
-EOF
-)

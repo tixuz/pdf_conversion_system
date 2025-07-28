@@ -6,6 +6,7 @@ RUN apt-get update && \
 
 WORKDIR /app
 
+# 👇 Then copy rest of app folder
 COPY app/ /app
 
 RUN pip install --no-cache-dir -r requirements.txt

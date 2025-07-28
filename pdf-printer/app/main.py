@@ -13,7 +13,7 @@ import subprocess
 import os
 import uuid
 import logging
-from markdown import markdown
+import markdown2
 
 RABBITMQ_HOST = os.getenv('RABBITMQ_HOST', 'rabbitmq')
 RABBITMQ_USER = os.getenv('RABBITMQ_USER', 'user')
@@ -34,7 +34,7 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 # Base paths
-BASE_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
+BASE_DIR = os.path.abspath(os.path.dirname(__file__))
 README_PATH = os.path.join(BASE_DIR, "README.md")
 
 # === Folder Setup ===
@@ -64,8 +64,7 @@ def verify_credentials(credentials: HTTPBasicCredentials = Depends(security)):
 # Load README and convert to HTML
 def get_readme_html():
     if os.path.exists(README_PATH):
-        with open(README_PATH, "r") as f:
-            return markdown(f.read())
+        return markdown2.markdown_path(README_PATH)
     return "<p>README not found.</p>"
 
 # === Index Page (README) ===
