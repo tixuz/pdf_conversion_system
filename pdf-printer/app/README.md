@@ -81,7 +81,7 @@ ssh ec2-user@your-ec2-host
 
 ### 2. Clone repo and setup:
 ```bash
-git clone https://github.com/yourusername/pdf_conversion_system.git
+git clone https://github.com/tixuz/pdf_conversion_system.git
 cd pdf_conversion_system
 mkdir shared
 chmod 777 shared
