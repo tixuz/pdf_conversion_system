@@ -106,6 +106,20 @@ $client = new \GuzzleHttp\Client();
 $response = $client->post('http://your-ec2-ip:5000/convert', [...]);
 ```
 
+### 6. 🔐 Restricting Access on EC2
+
+To ensure only your IP can access the PDF printer:
+
+- Go to **EC2 > Security Groups** for your instance
+- Edit **Inbound Rules**
+- Remove any 0.0.0.0/0 rule for port 5000
+- Add:
+  - Type: Custom TCP
+  - Port: 5000
+  - Source: YOUR_PUBLIC_IP/32
+
+This blocks access from all other sources.
+
 ---
 
 ## 🔐 Environment Variables
