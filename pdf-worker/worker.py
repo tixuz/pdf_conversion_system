@@ -19,6 +19,7 @@ def process_message(ch, method, properties, body):
         message = json.loads(body)
         xlsx_filename = message.get('xlsx')
         lo_options = message.get('lo_options')  # Optional custom LibreOffice options
+        delete_original = message.get('delete_original')  # Optional custom LibreOffice options
 
         if not xlsx_filename:
             print("No XLSX file provided in message.")
@@ -35,6 +36,8 @@ def process_message(ch, method, properties, body):
         }
         if lo_options:
             payload['lo_options'] = json.dumps(lo_options)  # send as string if needed
+        if delete_original:
+            payload['delete_original'] = delete_original  # send as string if needed
 
         response = requests.post(
             PRINTER_API_URL,

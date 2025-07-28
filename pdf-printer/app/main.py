@@ -172,13 +172,16 @@ async def queue_job(
     file: UploadFile = File(...),
     background_tasks: BackgroundTasks = None,
     lo_options: str = Form(default=None),
+    delete_original: str = Form(default="0"),
     credentials: HTTPBasicCredentials = Depends(verify_credentials)  # <-- protect this route
 ):
     try:
         tmp_file = os.path.join(TMP_DIR, file.filename)
         with open(tmp_file, "wb") as f:
             shutil.copyfileobj(file.file, f)
-        logger.info(f"Saved file: {tmp_file}")
+        logger.info(f"Saved 1 file: {tmp_file}")
+        body_options = json.dumps({'xlsx': file.filename, 'lo_options': lo_options, 'delete_original': delete_original})
+#         logger.info(f"get 1 body: {body_options}")
 
         if RABBITMQ_HOST and RABBITMQ_USER and RABBITMQ_PASS:
             credentials = pika.PlainCredentials(RABBITMQ_USER, RABBITMQ_PASS)
@@ -191,7 +194,7 @@ async def queue_job(
             channel.basic_publish(
                 exchange='',
                 routing_key='pdf_jobs',
-                body=json.dumps({'xlsx': file.filename, 'lo_options': lo_options}),
+                body=body_options,
                 properties=pika.BasicProperties(delivery_mode=2)
             )
             connection.close()
@@ -232,7 +235,8 @@ async def convert_xlsx(
     input_filename = file.filename
     input_path = os.path.join(TMP_DIR, input_filename)
     output_path = input_path.replace(".xlsx", ".pdf")
-
+    body_options = json.dumps({'lo_options': lo_options})
+    logger.info(f"lo options in convert: {body_options}")
     try:
         with open(input_path, "wb") as f:
             f.write(await file.read())
@@ -267,7 +271,7 @@ async def convert_xlsx(
 async def convert_in_shared_dir(
     filename: str = Form(...),
     lo_options: str = Form(default=None),
-    delete_original: int = Form(default=0),
+    delete_original: int = Form(default=1),
     credentials: HTTPBasicCredentials = Depends(verify_credentials)  # <-- protect this route
 ):
     input_path = os.path.join(TMP_DIR, filename)
@@ -278,8 +282,21 @@ async def convert_in_shared_dir(
         raise HTTPException(status_code=404, detail="File not found")
 
     try:
+        logger.info(f"Conversion requested: filename={filename}")
+        logger.info(f"lo_options: {lo_options}")
+        logger.info(f"delete_original: {delete_original}")
+
+        parsed_options = {}
         if lo_options:
-            convert_filter = f'pdf:calc_pdf_Export:{lo_options}'
+            try:
+                parsed_options = json.loads(lo_options)
+#                 logger.info(f"Parsed options: {parsed_options}")
+            except json.JSONDecodeError as e:
+                logger.warning(f"Invalid JSON in lo_options: {e}")
+
+        if parsed_options:
+#             json_options = json.dumps(parsed_options, separators=(",", ":"))
+            convert_filter = f'pdf:calc_pdf_Export:{parsed_options}'
             convert_cmd = [
                 "libreoffice", "--headless", "--convert-to", convert_filter, input_path, "--outdir", TMP_DIR
             ]
@@ -288,16 +305,17 @@ async def convert_in_shared_dir(
                 "libreoffice", "--headless", "--convert-to", "pdf", input_path, "--outdir", TMP_DIR
             ]
 
+        logger.info(f"convert filter: {convert_cmd}")
         result = subprocess.run(convert_cmd, capture_output=True, text=True)
         if result.returncode != 0:
             logger.error(f"LibreOffice failed: {result.stderr}")
             raise RuntimeError(f"LibreOffice failed: {result.stderr}")
 
-        logger.info(f"✅ PDF generated at: {output_path}")
+        logger.info(f"PDF generated at: {output_path}")
 
         if delete_original:
             os.remove(input_path)
-            logger.info(f"🗑️ Deleted original XLSX after conversion: {input_path}")
+            logger.info(f"Deleted original XLSX after conversion: {input_path}")
 
         return {"status": "success", "pdf": os.path.basename(output_path)}
 
