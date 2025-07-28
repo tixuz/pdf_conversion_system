@@ -1,0 +1,32 @@
+{% extends "base.html" %}
+{% block content %}
+<h1>Generated PDFs</h1>
+<table id="files-table">
+    <thead>
+        <tr>
+            <th>Filename</th>
+            <th>Download</th>
+            <th>Delete</th>
+        </tr>
+    </thead>
+    <tbody>
+    {% for f in pdf_files %}
+    <tr>
+        <td>{{ f }}</td>
+        <td><a href="/files/{{ f }}" target="_blank">Download</a></td>
+        <td>
+            <form action="/delete-file" method="post" style="display:inline;">
+                <input type="hidden" name="filename" value="{{ f }}">
+                <button type="submit">🗑️</button>
+            </form>
+        </td>
+    </tr>
+    {% endfor %}
+    </tbody>
+</table>
+<script>
+$(document).ready(function(){
+    $('#files-table').DataTable({pageLength:10});
+});
+</script>
+{% endblock %}

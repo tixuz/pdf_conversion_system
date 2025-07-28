@@ -13,6 +13,7 @@ import subprocess
 import os
 import uuid
 import logging
+from markdown import markdown
 
 RABBITMQ_HOST = os.getenv('RABBITMQ_HOST', 'rabbitmq')
 RABBITMQ_USER = os.getenv('RABBITMQ_USER', 'user')
@@ -31,6 +32,10 @@ logging.basicConfig(
     ]
 )
 logger = logging.getLogger(__name__)
+
+# Base paths
+BASE_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
+README_PATH = os.path.join(BASE_DIR, "README.md")
 
 # === Folder Setup ===
 TMP_DIR = "/app/shared"
@@ -56,21 +61,58 @@ def verify_credentials(credentials: HTTPBasicCredentials = Depends(security)):
             headers={"WWW-Authenticate": "Basic"},
         )
 
-# === Index Page ===
+# Load README and convert to HTML
+def get_readme_html():
+    if os.path.exists(README_PATH):
+        with open(README_PATH, "r") as f:
+            return markdown(f.read())
+    return "<p>README not found.</p>"
+
+# === Index Page (README) ===
 @app.get("/")
 def index(request: Request):
-    files = os.listdir(TMP_DIR)
-    xlsx_files = sorted([f for f in files if f.endswith('.xlsx')])
-    pdf_files = sorted([f for f in files if f.endswith('.pdf')])
-
-    fonts_output = os.popen("fc-list : file family").readlines()
-    fonts = sorted(set(line.strip() for line in fonts_output))
-
+    readme_html = get_readme_html()
     return templates.TemplateResponse("index.html", {
         "request": request,
-        "xlsx_files": xlsx_files,
-        "pdf_files": pdf_files,
+        "readme_html": readme_html
+    })
+
+# === PDFs Page ===
+@app.get("/pdfs")
+def list_pdfs(request: Request):
+    files = os.listdir(TMP_DIR)
+    pdf_files = sorted([f for f in files if f.endswith('.pdf')])
+    return templates.TemplateResponse("pdfs.html", {
+        "request": request,
+        "pdf_files": pdf_files
+    })
+
+# === Fonts Page ===
+@app.get("/fonts")
+def list_fonts(request: Request):
+    fonts_output = os.popen("fc-list : file family").readlines()
+    fonts = sorted(set(line.strip() for line in fonts_output))
+    return templates.TemplateResponse("fonts.html", {
+        "request": request,
         "fonts": fonts
+    })
+
+# === RabbitMQ Queue Stats ===
+@app.get("/queue-stats")
+def queue_stats(request: Request):
+    queue_len = None
+    try:
+        credentials = pika.PlainCredentials(RABBITMQ_USER, RABBITMQ_PASS)
+        connection = pika.BlockingConnection(pika.ConnectionParameters(host=RABBITMQ_HOST, credentials=credentials))
+        channel = connection.channel()
+        result = channel.queue_declare(queue='pdf_jobs', durable=True)
+        queue_len = result.method.message_count
+        connection.close()
+    except Exception as e:
+        logger.error(f"Failed to fetch queue stats: {e}")
+    return templates.TemplateResponse("queue.html", {
+        "request": request,
+        "queue_len": queue_len
     })
 
 # === Test Endpoint ===
@@ -94,7 +136,7 @@ async def upload_font(
 
     os.system("fc-cache -fv")
     logger.info(f"Installed font: {font_file.filename}")
-    return RedirectResponse(url="/", status_code=303)
+    return RedirectResponse(url="/fonts", status_code=303)
 
 # === Delete File ===
 @app.post("/delete-file")
@@ -108,7 +150,7 @@ async def delete_file(
         logger.info(f"Deleted file: {file_path}")
     else:
         logger.warning(f"Tried to delete non-existent file: {file_path}")
-    return RedirectResponse(url="/", status_code=303)
+    return RedirectResponse(url="/pdfs", status_code=303)
 
 # === Serve Files (PDF/XLSX) ===
 @app.get("/files/{filename}")

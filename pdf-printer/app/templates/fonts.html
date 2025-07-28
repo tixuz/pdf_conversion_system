@@ -1,0 +1,24 @@
+{% extends "base.html" %}
+{% block content %}
+<h1>Installed Fonts</h1>
+<table id="fonts-table">
+    <thead>
+        <tr><th>Font</th></tr>
+    </thead>
+    <tbody>
+    {% for font in fonts %}
+    <tr><td>{{ font }}</td></tr>
+    {% endfor %}
+    </tbody>
+</table>
+<h3>Upload New Font</h3>
+<form action="/upload-font" method="post" enctype="multipart/form-data">
+    <input type="file" name="font_file" required>
+    <button type="submit">Upload</button>
+</form>
+<script>
+$(document).ready(function(){
+    $('#fonts-table').DataTable({pageLength:10});
+});
+</script>
+{% endblock %}

@@ -1,0 +1,9 @@
+{% extends "base.html" %}
+{% block content %}
+<h1>RabbitMQ Queue Stats</h1>
+{% if queue_len is not none %}
+<p>pdf_jobs queue length: {{ queue_len }}</p>
+{% else %}
+<p>Could not retrieve queue stats.</p>
+{% endif %}
+{% endblock %}
