@@ -1,0 +1,410 @@
+ (cd "$(git rev-parse --show-toplevel)" && git apply --3way <<'EOF'
+diff --git a/pdf-printer/app/main.py b/pdf-printer/app/main.py
+index 7abe443641bbd5462d7fa54b7ceb9aa36f1c886d..8c8aa2e5fe6512debaffd04a9dfac2efce2d13e9 100644
+--- a/pdf-printer/app/main.py
++++ b/pdf-printer/app/main.py
+@@ -1,136 +1,178 @@
+ from fastapi import FastAPI, UploadFile, File, Request, Form, Body, BackgroundTasks, HTTPException, Query
+ from fastapi.responses import FileResponse, RedirectResponse
+ from fastapi.templating import Jinja2Templates
+ from fastapi.staticfiles import StaticFiles
+ from fastapi.security import HTTPBasic, HTTPBasicCredentials
+ from fastapi import Depends
+
+ import secrets
+ import pika
+ import json
+ import shutil
+ import subprocess
+ import os
+ import uuid
+ import logging
++from markdown import markdown
+
+ RABBITMQ_HOST = os.getenv('RABBITMQ_HOST', 'rabbitmq')
+ RABBITMQ_USER = os.getenv('RABBITMQ_USER', 'user')
+ RABBITMQ_PASS = os.getenv('RABBITMQ_PASS', 'password')
+ security = HTTPBasic()
+ PDF_PRINTER_USER = os.getenv("PDF_PRINTER_USER", "admin")
+ PDF_PRINTER_PASS = os.getenv("PDF_PRINTER_PASS", "password")
+ # === Logging Setup ===
+ LOG_PATH = "/pdfprinter.log"
+ logging.basicConfig(
+     level=logging.DEBUG,
+     format='%(asctime)s [%(levelname)s] %(message)s',
+     handlers=[
+         logging.FileHandler(LOG_PATH),
+         logging.StreamHandler()  # <--- This will show logs in `docker logs`
+     ]
+ )
+ logger = logging.getLogger(__name__)
+
++# Base paths
++BASE_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
++README_PATH = os.path.join(BASE_DIR, "README.md")
++
+ # === Folder Setup ===
+ TMP_DIR = "/app/shared"
+ FONT_DIR = "/usr/share/fonts/truetype/custom"
+ os.makedirs(TMP_DIR, exist_ok=True)
+ os.makedirs(FONT_DIR, exist_ok=True)
+ os.chmod(TMP_DIR, 0o777)
+ os.chmod(FONT_DIR, 0o777)
+
+ # === App Setup ===
+ app = FastAPI()
+ logger.info("🚀 pdf-printer started and logging is active")
+ app.mount("/static", StaticFiles(directory="static"), name="static")
+ templates = Jinja2Templates(directory="templates")
+
+ def verify_credentials(credentials: HTTPBasicCredentials = Depends(security)):
+     correct_username = secrets.compare_digest(credentials.username, PDF_PRINTER_USER)
+     correct_password = secrets.compare_digest(credentials.password, PDF_PRINTER_PASS)
+     if not (correct_username and correct_password):
+         raise HTTPException(
+             status_code=401,
+             detail="Unauthorized",
+             headers={"WWW-Authenticate": "Basic"},
+         )
+
+-# === Index Page ===
++# Load README and convert to HTML
++def get_readme_html():
++    if os.path.exists(README_PATH):
++        with open(README_PATH, "r") as f:
++            return markdown(f.read())
++    return "<p>README not found.</p>"
++
++# === Index Page (README) ===
+ @app.get("/")
+ def index(request: Request):
++    readme_html = get_readme_html()
++    return templates.TemplateResponse("index.html", {
++        "request": request,
++        "readme_html": readme_html
++    })
++
++# === PDFs Page ===
++@app.get("/pdfs")
++def list_pdfs(request: Request):
+     files = os.listdir(TMP_DIR)
+-    xlsx_files = sorted([f for f in files if f.endswith('.xlsx')])
+     pdf_files = sorted([f for f in files if f.endswith('.pdf')])
++    return templates.TemplateResponse("pdfs.html", {
++        "request": request,
++        "pdf_files": pdf_files
++    })
+
++# === Fonts Page ===
++@app.get("/fonts")
++def list_fonts(request: Request):
+     fonts_output = os.popen("fc-list : file family").readlines()
+     fonts = sorted(set(line.strip() for line in fonts_output))
+-
+-    return templates.TemplateResponse("index.html", {
++    return templates.TemplateResponse("fonts.html", {
+         "request": request,
+-        "xlsx_files": xlsx_files,
+-        "pdf_files": pdf_files,
+         "fonts": fonts
+     })
+
++# === RabbitMQ Queue Stats ===
++@app.get("/queue-stats")
++def queue_stats(request: Request):
++    queue_len = None
++    try:
++        credentials = pika.PlainCredentials(RABBITMQ_USER, RABBITMQ_PASS)
++        connection = pika.BlockingConnection(pika.ConnectionParameters(host=RABBITMQ_HOST, credentials=credentials))
++        channel = connection.channel()
++        result = channel.queue_declare(queue='pdf_jobs', durable=True)
++        queue_len = result.method.message_count
++        connection.close()
++    except Exception as e:
++        logger.error(f"Failed to fetch queue stats: {e}")
++    return templates.TemplateResponse("queue.html", {
++        "request": request,
++        "queue_len": queue_len
++    })
++
+ # === Test Endpoint ===
+ @app.get("/hello")
+ def hello():
+     return {"message": "Hello, worldest!"}
+
+ # === Upload Font ===
+ @app.post("/upload-font")
+ async def upload_font(
+     font_file: UploadFile = File(...),
+     credentials: HTTPBasicCredentials = Depends(verify_credentials)  # <-- protect this route
+ ):
+     if not font_file.filename.endswith((".ttf", ".otf")):
+         logger.warning(f"Rejected font upload: {font_file.filename}")
+         return {"error": "Only .ttf and .otf fonts allowed."}
+
+     font_path = os.path.join(FONT_DIR, font_file.filename)
+     with open(font_path, "wb") as f:
+         shutil.copyfileobj(font_file.file, f)
+
+     os.system("fc-cache -fv")
+     logger.info(f"Installed font: {font_file.filename}")
+-    return RedirectResponse(url="/", status_code=303)
++    return RedirectResponse(url="/fonts", status_code=303)
+
+ # === Delete File ===
+ @app.post("/delete-file")
+ async def delete_file(
+     filename: str = Form(...),
+     credentials: HTTPBasicCredentials = Depends(verify_credentials)  # <-- protect this route
+ ):
+     file_path = os.path.join(TMP_DIR, filename)
+     if os.path.exists(file_path):
+         os.remove(file_path)
+         logger.info(f"Deleted file: {file_path}")
+     else:
+         logger.warning(f"Tried to delete non-existent file: {file_path}")
+-    return RedirectResponse(url="/", status_code=303)
++    return RedirectResponse(url="/pdfs", status_code=303)
+
+ # === Serve Files (PDF/XLSX) ===
+ @app.get("/files/{filename}")
+ async def get_file(
+     filename: str,
+     credentials: HTTPBasicCredentials = Depends(verify_credentials)  # <-- protect this route
+ ):
+     file_path = os.path.join(TMP_DIR, filename)
+     if os.path.exists(file_path):
+         return FileResponse(file_path)
+     logger.warning(f"Requested file not found: {file_path}")
+     return {"error": "File not found"}
+
+
+ # ====
+
+ # 🛠️ 3. **Make RabbitMQ Optional (Fallback to `/convert`)**
+ @app.post("/queue-job")
+ async def queue_job(
+     file: UploadFile = File(...),
+     background_tasks: BackgroundTasks = None,
+     lo_options: str = Form(default=None),
+     credentials: HTTPBasicCredentials = Depends(verify_credentials)  # <-- protect this route
+ ):
+     try:
+diff --git a/pdf-printer/app/requirements.txt b/pdf-printer/app/requirements.txt
+index 97f313f53f86f93c0961ef5e887974c1a4ed23ce..eb77d325c7745ea109123ba4d96e7d4ee93c193c 100644
+--- a/pdf-printer/app/requirements.txt
++++ b/pdf-printer/app/requirements.txt
+@@ -1,8 +1,9 @@
+ fastapi
+ uvicorn
+ pydantic
+ aiofiles
+ python-multipart
+ jinja2
+ pika
+ requests
++markdown
+diff --git a/pdf-printer/app/templates/base.html b/pdf-printer/app/templates/base.html
+new file mode 100644
+index 0000000000000000000000000000000000000000..f9298f2c340ae15cdb7c4e1121a67904c1afb6d3
+--- /dev/null
++++ b/pdf-printer/app/templates/base.html
+@@ -0,0 +1,25 @@
++<!DOCTYPE html>
++<html>
++<head>
++    <title>PDF Printer Dashboard</title>
++    <style>
++        body { font-family: sans-serif; padding: 2em; }
++        nav a { margin-right: 1em; }
++        table { width: 100%; border-collapse: collapse; margin-bottom: 2em; }
++        td, th { padding: 0.5em; border-bottom: 1px solid #ccc; }
++        h2 { margin-top: 2em; }
++    </style>
++    <link rel="stylesheet" href="https://cdn.datatables.net/1.13.6/css/jquery.dataTables.min.css">
++    <script src="https://code.jquery.com/jquery-3.7.0.min.js"></script>
++    <script src="https://cdn.datatables.net/1.13.6/js/jquery.dataTables.min.js"></script>
++</head>
++<body>
++<nav>
++    <a href="/">Home</a>
++    <a href="/pdfs">PDFs</a>
++    <a href="/fonts">Fonts</a>
++    <a href="/queue-stats">Queue Stats</a>
++</nav>
++{% block content %}{% endblock %}
++</body>
++</html>
+diff --git a/pdf-printer/app/templates/fonts.html b/pdf-printer/app/templates/fonts.html
+new file mode 100644
+index 0000000000000000000000000000000000000000..d5568b2d6a37ac527461cbe2aacf67101552787e
+--- /dev/null
++++ b/pdf-printer/app/templates/fonts.html
+@@ -0,0 +1,24 @@
++{% extends "base.html" %}
++{% block content %}
++<h1>Installed Fonts</h1>
++<table id="fonts-table">
++    <thead>
++        <tr><th>Font</th></tr>
++    </thead>
++    <tbody>
++    {% for font in fonts %}
++    <tr><td>{{ font }}</td></tr>
++    {% endfor %}
++    </tbody>
++</table>
++<h3>Upload New Font</h3>
++<form action="/upload-font" method="post" enctype="multipart/form-data">
++    <input type="file" name="font_file" required>
++    <button type="submit">Upload</button>
++</form>
++<script>
++$(document).ready(function(){
++    $('#fonts-table').DataTable({pageLength:10});
++});
++</script>
++{% endblock %}
+diff --git a/pdf-printer/app/templates/index.html b/pdf-printer/app/templates/index.html
+index 4a1d76a0837ce908999e1821698df1beb05ad3f5..ebcb83e9ca699ff8092682d5626a264f850eef6d 100644
+--- a/pdf-printer/app/templates/index.html
++++ b/pdf-printer/app/templates/index.html
+@@ -1,77 +1,5 @@
+-<!DOCTYPE html>
+-<html>
+-<head>
+-    <title>PDF Printer Dashboard</title>
+-    <style>
+-        body { font-family: sans-serif; padding: 2em; }
+-        table { width: 100%; border-collapse: collapse; margin-bottom: 2em; }
+-        td, th { padding: 0.5em; border-bottom: 1px solid #ccc; }
+-        h2 { margin-top: 2em; }
+-    </style>
+-    <!-- DataTables CSS -->
+-    <link rel="stylesheet" href="https://cdn.datatables.net/1.13.6/css/jquery.dataTables.min.css">
+-
+-    <!-- jQuery -->
+-    <script src="https://code.jquery.com/jquery-3.7.0.min.js"></script>
+-
+-    <!-- DataTables JS -->
+-    <script src="https://cdn.datatables.net/1.13.6/js/jquery.dataTables.min.js"></script>
+-
+-</head>
+-<body>
+-<h1>PDF Printer Dashboard</h1>
+-
+-<h2>📁 Uploaded Files</h2>
+-<table id="files-table">
+-    <thead>
+-    <tr>
+-        <th>Filename</th>
+-        <th>Download</th>
+-        <th>Delete</th>
+-    </tr>
+-    </thead>
+-    <tbody>
+-    {% for f in pdf_files + xlsx_files %}
+-    <tr>
+-        <td>{{ f }}</td>
+-        <td><a href="/files/{{ f }}" target="_blank">Download</a></td>
+-        <td>
+-            <form action="/delete-file" method="post" style="display:inline;">
+-                <input type="hidden" name="filename" value="{{ f }}">
+-                <button type="submit">🗑️</button>
+-            </form>
+-        </td>
+-    </tr>
+-    {% endfor %}
+-    </tbody>
+-</table>
+-
+-<h2>🔤 Installed Fonts</h2>
+-<table id="fonts-table">
+-    <thead>
+-    <tr><th>Font</th></tr>
+-    </thead>
+-    <tbody>
+-    {% for font in fonts %}
+-    <tr><td>{{ font }}</td></tr>
+-    {% endfor %}
+-    </tbody>
+-</table>
+-
+-<h3>📤 Upload New Font</h3>
+-<form action="/upload-font" method="post" enctype="multipart/form-data">
+-    <input type="file" name="font_file" required>
+-    <button type="submit">Upload</button>
+-</form>
+-<script>
+-    $(document).ready(function() {
+-        $('#fonts-table').DataTable({
+-            pageLength: 10
+-        });
+-        $('#files-table').DataTable({
+-            pageLength: 10
+-        });
+-    });
+-</script>
+-</body>
+-</html>
++{% extends "base.html" %}
++{% block content %}
++<h1>PDF Conversion System</h1>
++<div>{{ readme_html | safe }}</div>
++{% endblock %}
+diff --git a/pdf-printer/app/templates/pdfs.html b/pdf-printer/app/templates/pdfs.html
+new file mode 100644
+index 0000000000000000000000000000000000000000..c6f0bd6fb8f1d12809f7831406b20d4901ae6f98
+--- /dev/null
++++ b/pdf-printer/app/templates/pdfs.html
+@@ -0,0 +1,32 @@
++{% extends "base.html" %}
++{% block content %}
++<h1>Generated PDFs</h1>
++<table id="files-table">
++    <thead>
++        <tr>
++            <th>Filename</th>
++            <th>Download</th>
++            <th>Delete</th>
++        </tr>
++    </thead>
++    <tbody>
++    {% for f in pdf_files %}
++    <tr>
++        <td>{{ f }}</td>
++        <td><a href="/files/{{ f }}" target="_blank">Download</a></td>
++        <td>
++            <form action="/delete-file" method="post" style="display:inline;">
++                <input type="hidden" name="filename" value="{{ f }}">
++                <button type="submit">🗑️</button>
++            </form>
++        </td>
++    </tr>
++    {% endfor %}
++    </tbody>
++</table>
++<script>
++$(document).ready(function(){
++    $('#files-table').DataTable({pageLength:10});
++});
++</script>
++{% endblock %}
+diff --git a/pdf-printer/app/templates/queue.html b/pdf-printer/app/templates/queue.html
+new file mode 100644
+index 0000000000000000000000000000000000000000..9efc8b2bb65861f4904ba14213783b6211c0a6ee
+--- /dev/null
++++ b/pdf-printer/app/templates/queue.html
+@@ -0,0 +1,9 @@
++{% extends "base.html" %}
++{% block content %}
++<h1>RabbitMQ Queue Stats</h1>
++{% if queue_len is not none %}
++<p>pdf_jobs queue length: {{ queue_len }}</p>
++{% else %}
++<p>Could not retrieve queue stats.</p>
++{% endif %}
++{% endblock %}
+
+EOF
+)
